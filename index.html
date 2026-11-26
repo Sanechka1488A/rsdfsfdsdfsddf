@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📱 Android Screen Cast</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .status-bar {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .status-item {
+            text-align: center;
+        }
+        
+        .status-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .status-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .status-online {
+            color: #10b981;
+        }
+        
+        .status-offline {
+            color: #ef4444;
+        }
+        
+        .screen-container {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        #screen {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        }
+        
+        .no-screen {
+            padding: 100px 20px;
+            color: #999;
+            font-size: 1.2em;
+        }
+        
+        .instructions {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        
+        .instructions h2 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .instructions ol {
+            color: #666;
+            line-height: 1.8;
+            padding-left: 20px;
+        }
+        
+        .instructions code {
+            background: #f3f4f6;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #e11d48;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .loading {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 Android Screen Cast</h1>
+        
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-label">Статус</div>
+                <div class="status-value" id="status">
+                    <span class="status-offline">⚫ Offline</span>
+                </div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">FPS</div>
+                <div class="status-value" id="fps">0</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Задержка</div>
+                <div class="status-value" id="delay">-</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Последнее обновление</div>
+                <div class="status-value" id="lastUpdate">-</div>
+            </div>
+        </div>
+        
+        <div class="screen-container">
+            <div id="noScreen" class="no-screen">
+                <div>⏳ Ожидание подключения...</div>
+                <div style="font-size: 0.8em; margin-top: 10px;">
+                    Отправьте команду <code>/screencast start</code> в Telegram бот
+                </div>
+            </div>
+            <img id="screen" style="display: none;" />
+        </div>
+        
+        <div class="instructions">
+            <h2>📖 Инструкция</h2>
+            <ol>
+                <li>Установите Android приложение на телефон</li>
+                <li>Откройте Telegram бот</li>
+                <li>Отправьте команду <code>/screencast start</code></li>
+                <li>Экран телефона появится здесь в реальном времени!</li>
+                <li>Для остановки: <code>/screencast stop</code></li>
+            </ol>
+        </div>
+    </div>
+    
+    <script>
+        let lastTimestamp = 0;
+        let frameCount = 0;
+        let fpsStartTime = Date.now();
+        
+        const screenImg = document.getElementById('screen');
+        const noScreen = document.getElementById('noScreen');
+        const statusEl = document.getElementById('status');
+        const fpsEl = document.getElementById('fps');
+        const delayEl = document.getElementById('delay');
+        const lastUpdateEl = document.getElementById('lastUpdate');
+        
+        // Подключаемся к Server-Sent Events
+        const eventSource = new EventSource('/events');
+        
+        eventSource.onmessage = (event) => {
+            const timestamp = parseInt(event.data);
+            if (timestamp > lastTimestamp) {
+                lastTimestamp = timestamp;
+                updateScreen();
+            }
+        };
+        
+        eventSource.onerror = () => {
+            console.error('SSE connection error');
+            statusEl.innerHTML = '<span class="status-offline">⚫ Offline</span>';
+        };
+        
+        function updateScreen() {
+            const url = `/screenshot?t=${Date.now()}`;
+            
+            fetch(url)
+                .then(response => {
+                    if (response.ok) {
+                        return response.blob();
+                    }
+                    throw new Error('No screenshot');
+                })
+                .then(blob => {
+                    const objectUrl = URL.createObjectURL(blob);
+                    screenImg.src = objectUrl;
+                    screenImg.style.display = 'block';
+                    noScreen.style.display = 'none';
+                    
+                    statusEl.innerHTML = '<span class="status-online">🟢 Online</span>';
+                    
+                    // Обновляем FPS
+                    frameCount++;
+                    const now = Date.now();
+                    const elapsed = (now - fpsStartTime) / 1000;
+                    if (elapsed >= 1) {
+                        const fps = Math.round(frameCount / elapsed);
+                        fpsEl.textContent = fps;
+                        frameCount = 0;
+                        fpsStartTime = now;
+                    }
+                    
+                    // Обновляем задержку
+                    const delay = now - lastTimestamp;
+                    delayEl.textContent = delay + 'ms';
+                    
+                    // Обновляем время
+                    const date = new Date(lastTimestamp);
+                    lastUpdateEl.textContent = date.toLocaleTimeString();
+                })
+                .catch(err => {
+                    console.error('Error loading screenshot:', err);
+                    screenImg.style.display = 'none';
+                    noScreen.style.display = 'block';
+                    statusEl.innerHTML = '<span class="status-offline">⚫ Offline</span>';
+                });
+        }
+        
+        // Проверяем статус каждые 5 секунд
+        setInterval(() => {
+            fetch('/status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.hasScreenshot && Date.now() - data.lastUpdate > 5000) {
+                        statusEl.innerHTML = '<span class="status-offline">⚫ Offline</span>';
+                    }
+                })
+                .catch(err => console.error('Status check error:', err));
+        }, 5000);
+        
+        // Первоначальная загрузка
+        updateScreen();
+    </script>
+</body>
+</html>
